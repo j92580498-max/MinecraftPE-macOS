@@ -6,6 +6,10 @@
 #include "../../platform/time.h"
 #include "../../AppPlatform.h"
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 /*static*/ int  Textures::textureChanges = 0;
 /*static*/ bool Textures::MIPMAP = false;
 
@@ -110,7 +114,11 @@ TextureId Textures::assignTexture( const std::string& resourceName, const Textur
         case TEXF_COMPRESSED_PVRTC_565:
         case TEXF_COMPRESSED_PVRTC_5551:
         {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+            // PVRTC compressed textures are an iOS GLES extension; desktop
+            // OpenGL on macOS has no equivalent. Just drop the texture
+            // upload on macOS — the engine only ever produces PVRTC data
+            // when running on real iOS, so this branch is never hit there.
             int fmt = img.transparent? GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG : GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG;
             glCompressedTexImage2D(GL_TEXTURE_2D, 0, fmt, img.w, img.h, 0, img.numBytes, img.data);
 #endif

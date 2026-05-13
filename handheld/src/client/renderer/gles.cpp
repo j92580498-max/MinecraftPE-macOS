@@ -39,8 +39,9 @@ void __gluMakeIdentityf(GLfloat m[16]) {
 
 void glInit()
 {
-#ifndef OPENGL_ES
-	
+#if !defined(OPENGL_ES) && !defined(__APPLE__)
+	// macOS gets desktop GL straight from OpenGL.framework (no GLEW needed);
+	// only the Win32 build links against GLEW and has to bootstrap it.
 	GLenum err = glewInit();
 	printf("Err: %d\n", err);
 #endif

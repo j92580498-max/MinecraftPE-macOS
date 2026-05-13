@@ -1,5 +1,7 @@
 #include "MoveFolder.h"
 
+#import <Foundation/Foundation.h>
+
 void moveFolder(const std::string& src, const std::string& dst) {
     NSError* error = NULL;
     [[NSFileManager defaultManager]

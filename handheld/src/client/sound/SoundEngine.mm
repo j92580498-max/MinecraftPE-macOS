@@ -3,6 +3,8 @@
 #include "../Minecraft.h"
 #include "../../world/entity/Mob.h"
 
+#import <Foundation/Foundation.h>
+
 /*
  
  File: MyOpenALSupport.c

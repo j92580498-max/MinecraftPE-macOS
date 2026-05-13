@@ -24,16 +24,39 @@ back-ends are kept in place — only the macOS target is new.
 
 ```sh
 cd handheld/project/osxproj
-make            # debug build  -> build/Minecraft\ PE.app
+make            # debug build  -> build/MinecraftPE.app
 make BUILD=release
 make run        # build + open the .app
 make clean
 ```
 
-The build produces a self-contained `Minecraft PE.app` bundle with
+The build produces a self-contained `MinecraftPE.app` bundle with
 the contents of `handheld/data/` staged into `Contents/Resources/`.
-World saves and options are stored under
-`~/Library/Application Support/MinecraftPE/`.
+The user-visible name is still "Minecraft PE" — that comes from the
+bundle's `CFBundleDisplayName` in `Info.plist`. World saves and
+options are stored under `~/Library/Application Support/MinecraftPE/`.
+
+### Cross-compiling from Linux (optional)
+
+The Makefile is intentionally toolchain-agnostic so the same
+`make` invocation works under [OSXCross](https://github.com/tpoechtrager/osxcross)
+with the public [MacOSX10.9.sdk](https://github.com/phracker/MacOSX-SDKs)
+(produces a Mach-O `x86_64` binary linked against the same 10.9 SDK
+frameworks as a native Xcode build):
+
+```sh
+export PATH="$OSXCROSS/target/bin:$PATH"
+cd handheld/project/osxproj
+make -j$(nproc) \
+    CXX=x86_64-apple-darwin13-clang++ \
+    OBJCXX=x86_64-apple-darwin13-clang++ \
+    EXTRA_CXXFLAGS="-stdlib=libstdc++" \
+    EXTRA_LDFLAGS="-stdlib=libstdc++"
+```
+
+`-stdlib=libstdc++` is required because the 10.9 SDK ships with
+GCC's libstdc++ 4.2.1 — the engine targets `-std=c++98` anyway, so
+that's the right runtime.
 
 ## What's in the macOS port
 
@@ -80,10 +103,10 @@ World saves and options are stored under
 
 ## Current limitations
 
-- Sound is not wired up — the engine's `SoundEngine` already guards
-  most of its sound-table population with `#if !defined(__APPLE__)`,
-  so the game runs silent on macOS the same way it does on iOS at
-  this point. Wiring up `AVAudioPlayer` / OpenAL is a separate change.
+- Sound uses the iOS code path (`SoundEngine.mm` + OpenAL +
+  AudioToolbox/ExtAudioFile for m4a decoding). That code path was
+  written for iOS device speakers; it has been compiled but not yet
+  smoke-tested on macOS hardware.
 - The settings dialog (`DIALOG_MAINMENU_OPTIONS`) currently shows an
   `NSAlert` pointing at `NSUserDefaults`. A richer `NSWindow`-based
   settings panel can be added later without touching the engine.

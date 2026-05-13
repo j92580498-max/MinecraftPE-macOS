@@ -15,7 +15,10 @@
 #  Target: OS X 10.9 (Mavericks), x86_64 only, legacy OpenGL 2.1 profile.
 # ============================================================================
 
-APPNAME   := Minecraft PE
+# NOTE: the on-disk bundle name has no space in it (so make / shell rules
+# don't have to quote $(APPBUNDLE) everywhere). The user-visible name still
+# comes from Info.plist's CFBundleDisplayName="Minecraft PE".
+APPNAME   := MinecraftPE
 EXECNAME  := MinecraftPE
 BUILDDIR  := build
 APPBUNDLE := $(BUILDDIR)/$(APPNAME).app
@@ -48,15 +51,15 @@ else
     OBJDIR := obj/debug
 endif
 
-CXXFLAGS    := $(COMMON_FLAGS) $(OPT) -std=c++98 -fno-rtti
-OBJCXXFLAGS := $(COMMON_FLAGS) $(OPT) -std=c++98 -fno-rtti -fno-objc-arc
+CXXFLAGS    := $(COMMON_FLAGS) $(OPT) -std=c++98 -fno-rtti $(EXTRA_CXXFLAGS)
+OBJCXXFLAGS := $(COMMON_FLAGS) $(OPT) -std=c++98 -fno-rtti -fno-objc-arc $(EXTRA_CXXFLAGS)
 
-FRAMEWORKS := -framework Cocoa -framework OpenGL -framework Foundation \
-              -framework AppKit -framework CoreGraphics \
-              -framework AudioToolbox -framework CoreFoundation \
-              -framework Carbon
+FRAMEWORKS := -framework Cocoa -framework OpenGL -framework OpenAL \
+              -framework Foundation -framework AppKit \
+              -framework CoreGraphics -framework AudioToolbox \
+              -framework CoreFoundation -framework Carbon
 
-LDFLAGS := -arch $(ARCH) -mmacosx-version-min=$(MIN_OSX) -lz $(FRAMEWORKS)
+LDFLAGS := -arch $(ARCH) -mmacosx-version-min=$(MIN_OSX) -lz $(FRAMEWORKS) $(EXTRA_LDFLAGS)
 
 # ---- Sources ---------------------------------------------------------------
 # Recursively pick up everything under handheld/src/ except the entry points
@@ -65,9 +68,16 @@ ENGINE_CPP := $(shell find $(SRCROOT) -name '*.cpp' \
                 ! -name 'main.cpp' \
                 ! -name 'main_*.cpp' \
                 ! -name 'AppPlatform_win32.cpp' \
-                ! -name 'AppPlatform_android*.cpp')
+                ! -name 'AppPlatform_android*.cpp' \
+                ! -name 'SoundSystemSL.cpp' \
+                ! -name 'SoundEngine.cpp')
 
-ENGINE_MM  := $(SRCROOT)/AppPlatform_macOS.mm
+# For SoundEngine and MoveFolder we use the .mm versions (same as iOS) — they
+# contain the OpenAL / NSFileManager integration that the desktop GL build
+# needs. The .cpp twin of SoundEngine is excluded from ENGINE_CPP above.
+ENGINE_MM  := $(SRCROOT)/AppPlatform_macOS.mm \
+              $(SRCROOT)/client/sound/SoundEngine.mm \
+              $(SRCROOT)/world/level/storage/MoveFolder.mm
 
 OSXPROJ_MM := \
     $(OSXPROJ)/main.mm \

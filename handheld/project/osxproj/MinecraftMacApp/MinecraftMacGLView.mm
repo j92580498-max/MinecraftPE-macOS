@@ -304,11 +304,12 @@ static int translateNSKeyCodeToEngineKey(unsigned short macKeyCode, NSString* ch
 
 - (void)flagsChanged:(NSEvent*)event
 {
-    // Track shift, ctrl, etc. via modifier flags.
-    NSEventModifierFlags mods = [event modifierFlags];
-    static NSEventModifierFlags prevMods = 0;
+    // NSEventModifierFlags was introduced in the 10.10 SDK; on the 10.9
+    // SDK the underlying type is just NSUInteger.
+    NSUInteger mods = [event modifierFlags];
+    static NSUInteger prevMods = 0;
 
-    NSEventModifierFlags changed = mods ^ prevMods;
+    NSUInteger changed = mods ^ prevMods;
     if (changed & NSShiftKeyMask) {
         Keyboard::feed((unsigned char)Keyboard::KEY_LSHIFT,
                        (mods & NSShiftKeyMask) ? 1 : 0);
