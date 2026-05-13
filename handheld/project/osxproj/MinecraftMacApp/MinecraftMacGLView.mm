@@ -67,21 +67,56 @@ static int translateNSKeyCodeToEngineKey(unsigned short macKeyCode, NSString* ch
 
 - (id)initWithFrame:(NSRect)frameRect
 {
-    NSOpenGLPixelFormatAttribute attrs[] = {
+    // We need the legacy / 2.1 compatibility profile so the engine's
+    // fixed-function calls (glPushMatrix, glEnableClientState, ...) work.
+    //
+    // Try three attribute sets in order of preference:
+    //   1. accelerated, 24-bit colour + 24-bit depth, legacy profile
+    //      (the path real Mac hardware will take)
+    //   2. same but without NSOpenGLPFAAccelerated  (headless / VM /
+    //      Apple Silicon under Rosetta runners — no accelerated legacy GL)
+    //   3. plain double-buffered legacy profile (last-resort minimum)
+    NSOpenGLPixelFormatAttribute attrs_accel[] = {
         NSOpenGLPFADoubleBuffer,
         NSOpenGLPFAColorSize,   (NSOpenGLPixelFormatAttribute)24,
         NSOpenGLPFADepthSize,   (NSOpenGLPixelFormatAttribute)24,
         NSOpenGLPFAAccelerated,
-        // Stick with the legacy / 2.1 compatibility profile so the engine's
-        // fixed-function calls (glPushMatrix, glEnableClientState, ...) work.
-        NSOpenGLPFAOpenGLProfile, (NSOpenGLPixelFormatAttribute)NSOpenGLProfileVersionLegacy,
+        NSOpenGLPFAOpenGLProfile,
+            (NSOpenGLPixelFormatAttribute)NSOpenGLProfileVersionLegacy,
         (NSOpenGLPixelFormatAttribute)0
     };
-    NSOpenGLPixelFormat* pf = [[NSOpenGLPixelFormat alloc] initWithAttributes:attrs];
+    NSOpenGLPixelFormatAttribute attrs_sw[] = {
+        NSOpenGLPFADoubleBuffer,
+        NSOpenGLPFAColorSize,   (NSOpenGLPixelFormatAttribute)24,
+        NSOpenGLPFADepthSize,   (NSOpenGLPixelFormatAttribute)24,
+        NSOpenGLPFAOpenGLProfile,
+            (NSOpenGLPixelFormatAttribute)NSOpenGLProfileVersionLegacy,
+        (NSOpenGLPixelFormatAttribute)0
+    };
+    NSOpenGLPixelFormatAttribute attrs_min[] = {
+        NSOpenGLPFADoubleBuffer,
+        NSOpenGLPFAOpenGLProfile,
+            (NSOpenGLPixelFormatAttribute)NSOpenGLProfileVersionLegacy,
+        (NSOpenGLPixelFormatAttribute)0
+    };
+
+    NSOpenGLPixelFormat* pf = nil;
+    const char* picked = "none";
+    pf = [[NSOpenGLPixelFormat alloc] initWithAttributes:attrs_accel];
+    if (pf) { picked = "accelerated"; }
+    else {
+        pf = [[NSOpenGLPixelFormat alloc] initWithAttributes:attrs_sw];
+        if (pf) { picked = "software"; }
+        else {
+            pf = [[NSOpenGLPixelFormat alloc] initWithAttributes:attrs_min];
+            if (pf) { picked = "minimum"; }
+        }
+    }
     if (!pf) {
-        NSLog(@"Couldn't create OpenGL pixel format with legacy profile");
+        NSLog(@"Couldn't create any OpenGL pixel format (legacy profile)");
         return nil;
     }
+    NSLog(@"OpenGL pixel format: %s", picked);
     self = [super initWithFrame:frameRect pixelFormat:pf];
     [pf release];
     if (!self) return nil;
