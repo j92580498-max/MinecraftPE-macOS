@@ -1,0 +1,116 @@
+name: macOS build + smoke-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# We want to know "does the .app come up at all?" — not a benchmark.
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13   # Intel — the "natural" target for a 10.9 bin
+            label:  intel
+          - runner: macos-14   # Apple Silicon — exercises Rosetta path
+            label:  arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          set -x
+          sw_vers
+          uname -a
+          xcode-select -p
+          clang --version
+          make --version | head -1
+
+      - name: Build .app (native clang, SDK ≥10.9)
+        working-directory: handheld/project/osxproj
+        run: |
+          # The Makefile is the same one we cross-build with. On a native
+          # macOS runner we don't need EXTRA_CXXFLAGS / -stdlib=libstdc++ —
+          # the system libc++ is fine for -std=c++98 -fno-rtti, and the bin
+          # still gets -mmacosx-version-min=10.9 from the Makefile.
+          time make -j$(sysctl -n hw.ncpu) BUILD=release
+          ls -la build/
+          ls -la build/MinecraftPE.app/Contents/MacOS/
+
+      - name: Inspect the Mach-O
+        working-directory: handheld/project/osxproj
+        run: |
+          set -x
+          BIN=build/MinecraftPE.app/Contents/MacOS/MinecraftPE
+          file "$BIN"
+          otool -hv "$BIN" | head -20
+          otool -l  "$BIN" | grep -A3 LC_BUILD_VERSION || \
+            otool -l "$BIN" | grep -A3 LC_VERSION_MIN_MACOSX || true
+          otool -L  "$BIN"
+
+      - name: Launch the .app and capture a screenshot
+        working-directory: handheld/project/osxproj
+        run: |
+          set +e
+          BIN=build/MinecraftPE.app/Contents/MacOS/MinecraftPE
+          # Run the bundle binary directly so we capture stdout/stderr. The
+          # bundle layout is still correct, so NSBundle/Resources resolve
+          # the same way as under `open MinecraftPE.app`.
+          ( "$BIN" >run.log 2>&1 ) &
+          PID=$!
+          echo "launched PID=$PID"
+
+          # Give it time to: NSApplicationDelegate fires, window opens,
+          # GL context comes up, Minecraft loads textures + main menu.
+          # GH runners have software GL, so be generous.
+          for i in 1 2 3 4 5; do
+            sleep 5
+            if kill -0 "$PID" 2>/dev/null; then
+              echo "[$i] still alive"
+            else
+              echo "[$i] exited — capturing log and breaking"
+              break
+            fi
+          done
+
+          # Capture screen + active window listing regardless of state.
+          screencapture -x -t png screenshot.png || true
+          osascript -e 'tell application "System Events" to get name of every process whose visible is true' \
+            > processes.txt 2>&1 || true
+
+          # Clean shutdown.
+          kill -TERM "$PID" 2>/dev/null || true
+          sleep 1
+          kill -KILL "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null
+          RC=$?
+          echo "exit code: $RC"
+
+          echo "=== run.log (last 80 lines) ==="
+          tail -80 run.log || true
+          echo "=== processes ==="
+          cat processes.txt || true
+
+          # The job itself should not fail just because we killed the app;
+          # what matters is the artifact (log + screenshot) for the user
+          # to look at.
+          exit 0
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.label }}
+          path: |
+            handheld/project/osxproj/run.log
+            handheld/project/osxproj/screenshot.png
+            handheld/project/osxproj/processes.txt
+          if-no-files-found: warn
