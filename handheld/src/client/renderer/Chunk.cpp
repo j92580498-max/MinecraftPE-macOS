@@ -134,7 +134,16 @@ void Chunk::rebuild()
 							//printf("Tesselator::offset : %f, %f, %f\n", this->x, this->y, this->z);
 						}
 
-						Tile* tile = Tile::tiles[tileId];
+						Tile* tile = (tileId >= 0 && tileId < Tile::NUM_BLOCK_TYPES)
+						                 ? Tile::tiles[tileId] : NULL;
+						// Defensive: on real Mavericks hardware we hit a SIGSEGV
+						// here when a chunk byte points at a Tile slot that was
+						// never registered or got corrupted (the iOS port has
+						// the same diagnostic for "Missing category for tile
+						// 95/255"). Calling getRenderLayer() on garbage
+						// dereferences the vtable and crashes the renderer.
+						// Reject NULL and obviously-bogus (page-zero) pointers.
+						if (!tile || (uintptr_t)tile < 0x10000) continue;
 						int renderLayer = tile->getRenderLayer();
 
 //                        if (renderLayer == l)

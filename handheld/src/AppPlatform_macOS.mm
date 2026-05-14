@@ -15,22 +15,53 @@
 // On macOS the equivalent of UIImage is NSImage, but NSImage may flip pixels
 // or composite premultiplied alpha unexpectedly, so we go via NSBitmapImageRep
 // for a deterministic decode path.
+//
+// Engine callers pass paths like "gui/gui.png", "terrain.png", "mob/cow.png".
+// In our app bundle the data/ tree is copied verbatim to Contents/Resources/,
+// so the real on-disk location is Contents/Resources/images/<path>.png. We
+// purposefully do NOT strip the subdirectory the way the iOS port did — iOS
+// puts all PNGs flat in the bundle, but on macOS we keep the nested layout
+// because pathForResource:inDirectory: only finds the top-level Resources/
+// folder (and *.lproj children) without it.
 
-static NSString* findBundleResource(const std::string& filename, NSString* ext) {
-    NSString *p = [[NSString alloc] initWithUTF8String:filename.c_str()];
-    NSString *path = [[NSBundle mainBundle] pathForResource:p ofType:ext];
-    [p release];
-    if (path) return path;
+static NSString* findBundleResource(const std::string& relpath, NSString* ext) {
+    // relpath here looks like "gui/gui" or "terrain" or "mob/cow" — no extension.
+    std::string sep("/");
+    size_t slash = relpath.rfind("/");
+    std::string subdir = (slash == std::string::npos) ? std::string() : relpath.substr(0, slash);
+    std::string base   = (slash == std::string::npos) ? relpath        : relpath.substr(slash+1);
+
+    NSString *nsBase = [NSString stringWithUTF8String:base.c_str()];
+
+    // Primary: real layout in our bundle is Resources/images/<subdir>/<base>.<ext>
+    // pathForResource:ofType:inDirectory: accepts a Resources-relative subdirectory.
+    NSMutableArray *bundleSubdirs = [NSMutableArray array];
+    if (!subdir.empty()) {
+        [bundleSubdirs addObject:[NSString stringWithFormat:@"images/%s", subdir.c_str()]];
+        [bundleSubdirs addObject:[NSString stringWithUTF8String:subdir.c_str()]];
+    }
+    [bundleSubdirs addObject:@"images"];
+    [bundleSubdirs addObject:@""];
+
+    for (NSString *sub in bundleSubdirs) {
+        NSString *path = [[NSBundle mainBundle] pathForResource:nsBase
+                                                         ofType:ext
+                                                    inDirectory:sub];
+        if (path && [[NSFileManager defaultManager] fileExistsAtPath:path]) return path;
+    }
+
+    // Last-ditch flat fallback (the way the iOS port shipped resources).
+    NSString *flat = [[NSBundle mainBundle] pathForResource:nsBase ofType:ext];
+    if (flat) return flat;
 
     // Development fallback: look beside the .app in handheld/data/images
     // (matches the layout used by the Win32 target).
     NSString *bundleParent = [[[NSBundle mainBundle] bundlePath] stringByDeletingLastPathComponent];
     NSArray *candidates = [NSArray arrayWithObjects:
-        [NSString stringWithFormat:@"%@/%s.%@", bundleParent, filename.c_str(), ext],
-        [NSString stringWithFormat:@"%@/data/images/%s.%@", bundleParent, filename.c_str(), ext],
-        [NSString stringWithFormat:@"%@/data/%s.%@", bundleParent, filename.c_str(), ext],
-        [NSString stringWithFormat:@"%@/../data/images/%s.%@", bundleParent, filename.c_str(), ext],
-        [NSString stringWithFormat:@"%@/../data/%s.%@", bundleParent, filename.c_str(), ext],
+        [NSString stringWithFormat:@"%@/data/images/%s.%@", bundleParent, relpath.c_str(), ext],
+        [NSString stringWithFormat:@"%@/data/%s.%@",        bundleParent, relpath.c_str(), ext],
+        [NSString stringWithFormat:@"%@/../data/images/%s.%@", bundleParent, relpath.c_str(), ext],
+        [NSString stringWithFormat:@"%@/../data/%s.%@",        bundleParent, relpath.c_str(), ext],
         nil];
     for (NSString *cand in candidates) {
         if ([[NSFileManager defaultManager] fileExistsAtPath:cand]) return cand;
@@ -43,13 +74,13 @@ TextureData AppPlatform_macOS::loadTexture(const std::string& filename_, bool /*
     TextureData out;
     out.memoryHandledExternally = false;
 
-    // Strip extension and directory like the iOS port does.
+    // Strip extension only — keep the subdirectory so we can find files like
+    // images/gui/gui.png. The iOS port stripped the directory because its
+    // bundle was flat, but ours mirrors the source data/ layout.
     std::string filename = filename_;
     size_t dotp = filename.rfind(".");
-    size_t slashp = filename.rfind("/");
-    if (dotp != std::string::npos || slashp != std::string::npos) {
-        if (slashp == std::string::npos) slashp = (size_t)-1;
-        filename = filename.substr(slashp+1, dotp-(slashp+1));
+    if (dotp != std::string::npos) {
+        filename = filename.substr(0, dotp);
     }
 
     NSString *path = findBundleResource(filename, @"png");
