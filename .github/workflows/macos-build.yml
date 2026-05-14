@@ -14,10 +14,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-13   # Intel — the "natural" target for a 10.9 bin
-            label:  intel
-          - runner: macos-14   # Apple Silicon — exercises Rosetta path
-            label:  arm64
+          # GitHub retired the free macos-13 (Intel) runner in Dec 2025, so
+          # the only public runners left are Apple Silicon. We still build
+          # an x86_64 binary (Makefile pins -arch x86_64 + -mmacosx-version-min=10.9)
+          # and launch it through Rosetta — that's enough to prove the bundle
+          # actually starts up.
+          - runner: macos-14   # Sonoma   (arm64, runs x86_64 via Rosetta)
+            label:  sonoma
+          - runner: macos-15   # Sequoia  (arm64, runs x86_64 via Rosetta)
+            label:  sequoia
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
 
