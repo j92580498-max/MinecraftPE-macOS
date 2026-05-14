@@ -161,10 +161,16 @@ BinaryBlob AppPlatform_macOS::readAssetFile(const std::string& filename_)
 // ---------------------------------------------------------------------------
 std::string AppPlatform_macOS::getDateString(int s)
 {
+    // The engine's Font.cpp is a 256-slot bitmap that indexes its glyph
+    // sheet by raw byte value, so anything outside 7-bit ASCII renders as
+    // a sequence of garbage tiles (Cyrillic locales were producing the
+    // “strange symbol” the user reported on the world-list screen).
+    // Pin a fixed POSIX locale and ASCII-only format so the date looks
+    // the same regardless of system locale.
     NSDate* date = [NSDate dateWithTimeIntervalSince1970:s];
     NSDateFormatter *df = [[NSDateFormatter alloc] init];
-    [df setDateStyle:NSDateFormatterMediumStyle];
-    [df setTimeStyle:NSDateFormatterShortStyle];
+    [df setLocale:[[[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"] autorelease]];
+    [df setDateFormat:@"yyyy-MM-dd HH:mm"];
     NSString *ts = [df stringFromDate:date];
     std::string out([ts UTF8String]);
     [df release];
@@ -348,6 +354,22 @@ void AppPlatform_macOS::showDialog(int dialogId)
             [accessory addSubview:seedField];
         }
         [alert setAccessoryView:accessory];
+    }
+
+    // NSAlert puts the OK button as the keyboard focus by default, which
+    // makes the text field feel “dead” — the user has to mouse-click into
+    // it before typing anything, and on Mavericks that’s easy to miss
+    // because the field has no visible focus ring until it’s active.
+    // Push focus into the first text field once the modal sheet is laid
+    // out so typing just works.
+    if (nameField) {
+        [[alert window] performSelector:@selector(makeFirstResponder:)
+                             withObject:nameField
+                             afterDelay:0.0];
+    } else if (seedField) {
+        [[alert window] performSelector:@selector(makeFirstResponder:)
+                             withObject:seedField
+                             afterDelay:0.0];
     }
 
     NSModalResponse response = [alert runModal];
