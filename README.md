@@ -100,6 +100,7 @@ that's the right runtime.
 | Pause                        | `Esc`                                    |
 | Chat                         | `T`                                      |
 | Inventory                    | `Tab`                                    |
+| Toggle fullscreen            | `F11`                                    |
 
 ## Current limitations
 
@@ -107,9 +108,6 @@ that's the right runtime.
   AudioToolbox/ExtAudioFile for m4a decoding). That code path was
   written for iOS device speakers; it has been compiled but not yet
   smoke-tested on macOS hardware.
-- The settings dialog (`DIALOG_MAINMENU_OPTIONS`) currently shows an
-  `NSAlert` pointing at `NSUserDefaults`. A richer `NSWindow`-based
-  settings panel can be added later without touching the engine.
 - Networking compiles in but hasn't been smoke-tested against the
   iOS / Win32 ports yet.
 

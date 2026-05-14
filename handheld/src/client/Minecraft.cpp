@@ -1242,7 +1242,7 @@ void Minecraft::_reloadInput() {
 	if (useTouchscreen()) {
 		inputHolder = new TouchInputHolder(this, &options);
 	} else {
-		#if defined(ANDROID) || defined(__APPLE__) 
+		#if defined(ANDROID) || (defined(__APPLE__) && !defined(MINECRAFT_MACOS))
 			inputHolder = new CustomInputHolder(
 				new XperiaPlayInput(&options),
 				new ControllerTurnInput(2, ControllerTurnInput::MODE_DELTA),

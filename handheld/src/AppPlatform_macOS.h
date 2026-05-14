@@ -16,6 +16,7 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
+#include <map>
 
 #ifdef __OBJC__
 @class MinecraftMacGLView;
@@ -90,6 +91,9 @@ public:
     }
 
 private:
+    void saveOptionStrings(const StringVector& strings);
+    std::map<std::string, std::string> loadOptionMap();
+
     std::string _basePath;
     std::string _storagePath;
     int _screenW;

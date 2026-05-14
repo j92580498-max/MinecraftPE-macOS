@@ -41,6 +41,7 @@ WARN  := -Wall -Wno-unused-parameter -Wno-deprecated-declarations \
          -Wno-c++11-extensions -Wno-deprecated-register
 
 COMMON_FLAGS := -arch $(ARCH) -mmacosx-version-min=$(MIN_OSX) \
+                -DMINECRAFT_MACOS=1 \
                 -I$(SRCROOT) -I$(SRCROOT)/raknet $(WARN)
 
 ifeq ($(BUILD),release)

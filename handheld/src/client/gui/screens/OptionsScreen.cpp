@@ -4,6 +4,9 @@
 #include "DialogDefinitions.h"
 #include "../../Minecraft.h"
 #include "../../../AppPlatform.h"
+#include "../../../platform/input/Keyboard.h"
+#include "../../../world/level/Level.h"
+#include "../../../world/level/storage/LevelData.h"
 
 #include "../components/OptionsPane.h"
 #include "../components/ImageButton.h"
@@ -12,6 +15,7 @@ OptionsScreen::OptionsScreen()
 : btnClose(NULL),
   bHeader(NULL),
   btnUsername(NULL),
+  btnGameMode(NULL),
   selectedCategory(0),
   waitingForUsername(false) {
 }
@@ -28,6 +32,10 @@ OptionsScreen::~OptionsScreen() {
 	if(btnUsername != NULL) {
 		delete btnUsername;
 		btnUsername = NULL;
+	}
+	if(btnGameMode != NULL) {
+		delete btnGameMode;
+		btnGameMode = NULL;
 	}
 	for(std::vector<Touch::TButton*>::iterator it = categoryButtons.begin(); it != categoryButtons.end(); ++it) {
 		if(*it != NULL) {
@@ -96,6 +104,11 @@ void OptionsScreen::setupPositions() {
 		btnUsername->y = bHeader->height + 15;
 		btnUsername->width = width - categoryButtons[0]->width - 20;
 	}
+	if(btnGameMode != NULL && categoryButtons.size() > 0) {
+		btnGameMode->x = categoryButtons[0]->width + 10;
+		btnGameMode->y = bHeader->height + 15;
+		btnGameMode->width = width - categoryButtons[0]->width - 20;
+	}
 	selectCategory(0);
 }
 
@@ -118,6 +131,15 @@ void OptionsScreen::buttonClicked( Button* button ) {
 	} else if(button == btnUsername && btnUsername->visible) {
 		minecraft->platform()->createUserInput(DialogDefinitions::DIALOG_SET_USERNAME);
 		waitingForUsername = true;
+	} else if(button == btnGameMode && btnGameMode->visible) {
+		minecraft->setIsCreativeMode(!minecraft->isCreativeMode());
+		if(minecraft->level != NULL) {
+			minecraft->level->getLevelData()->setGameType(minecraft->isCreativeMode()? GameType::Creative : GameType::Survival);
+			minecraft->level->getLevelData()->setSpawnMobs(!minecraft->isCreativeMode());
+			minecraft->level->saveLevelData();
+		}
+		btnGameMode->msg = minecraft->isCreativeMode()? "Game mode: Creative" : "Game mode: Survival";
+		minecraft->options.save();
 	} else if(button->id > 1 && button->id < 7) {
 		// This is a category button
 		int categoryButton = button->id - categoryButtons[0]->id;
@@ -140,6 +162,8 @@ void OptionsScreen::selectCategory( int index ) {
 	// Show username button only on Account tab
 	if(btnUsername != NULL)
 		btnUsername->visible = (index == 0);
+	if(btnGameMode != NULL)
+		btnGameMode->visible = (index == 1 && minecraft->level != NULL);
 }
 
 void OptionsScreen::generateOptionScreens() {
@@ -154,6 +178,8 @@ void OptionsScreen::generateOptionScreens() {
 	optionPanes[0]->createOptionsGroup("options.group.mojang");
 
 	// Game Pane
+	btnGameMode = new Touch::TButton(11, minecraft->isCreativeMode()? "Game mode: Creative" : "Game mode: Survival");
+	buttons.push_back(btnGameMode);
 	optionPanes[1]->createOptionsGroup("options.group.game")
 		.addOptionItem(&Options::Option::THIRD_PERSON, minecraft)
 		.addOptionItem(&Options::Option::SERVER_VISIBLE, minecraft)
@@ -175,6 +201,15 @@ void OptionsScreen::generateOptionScreens() {
 		.addOptionItem(&Options::Option::GRAPHICS, minecraft)
 		.addOptionItem(&Options::Option::VIEW_BOBBING, minecraft)
 		.addOptionItem(&Options::Option::AMBIENT_OCCLUSION, minecraft);
+}
+
+void OptionsScreen::keyPressed(int key) {
+	if(key == Keyboard::KEY_ESCAPE) {
+		minecraft->reloadOptions();
+		minecraft->screenChooser.setScreen(SCREEN_STARTMENU);
+		return;
+	}
+	super::keyPressed(key);
 }
 
 void OptionsScreen::mouseClicked( int x, int y, int buttonNum ) {
