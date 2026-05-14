@@ -135,14 +135,22 @@ TextureData AppPlatform_macOS::loadTexture(const std::string& filename_, bool /*
 
 BinaryBlob AppPlatform_macOS::readAssetFile(const std::string& filename_)
 {
+    // Engine callers pass paths like "lang/en_US.lang" or "terrain.png".
+    // The iOS port stripped both the directory and the extension because its
+    // bundle was completely flat. Our macOS bundle mirrors the source
+    // data/ layout (Resources/lang/en_US.lang, Resources/sound/aac/...,
+    // Resources/images/...), so we must keep the subdirectory part —
+    // otherwise findBundleResource only looks under images/ and the
+    // bundle root and lang/ etc. is invisible. Only the extension is
+    // stripped; findBundleResource already searches the raw subdir as a
+    // fallback.
     std::string filename = filename_;
+    std::string ext;
     size_t dotp = filename.rfind(".");
     size_t slashp = filename.rfind("/");
-    std::string ext;
-    if (dotp != std::string::npos || slashp != std::string::npos) {
-        if (dotp != std::string::npos) ext = filename.substr(dotp+1);
-        if (slashp == std::string::npos) slashp = (size_t)-1;
-        filename = filename.substr(slashp+1, dotp-(slashp+1));
+    if (dotp != std::string::npos && (slashp == std::string::npos || dotp > slashp)) {
+        ext = filename.substr(dotp + 1);
+        filename = filename.substr(0, dotp);
     }
 
     NSString *rext = [NSString stringWithUTF8String:ext.c_str()];
@@ -307,23 +315,31 @@ namespace {
 
 struct DialogSpec {
     NSString* title;
+    NSString* informative;
+    NSString* namePlaceholder;
+    NSString* nameLabel;
     bool wantsName;
     bool wantsSeed;
     bool wantsGameMode;
 };
 
 DialogSpec dialogSpecFor(int dialogId) {
-    DialogSpec s = { @"Minecraft", false, false, false };
+    DialogSpec s = { @"Minecraft", @"", @"Name", @"Name:", false, false, false };
     if (dialogId == DialogDefinitions::DIALOG_CREATE_NEW_WORLD) {
         s.title = @"Create new world";
+        s.informative = @"Pick a name, an optional seed, and a game mode.";
         s.wantsName = true;
         s.wantsSeed = true;
         s.wantsGameMode = true;
     } else if (dialogId == DialogDefinitions::DIALOG_RENAME_MP_WORLD) {
         s.title = @"Rename world";
+        s.informative = @"Enter a new name for this world.";
         s.wantsName = true;
     } else if (dialogId == DialogDefinitions::DIALOG_SET_USERNAME) {
         s.title = @"Set username";
+        s.informative = @"This is the name other players see in chat.";
+        s.namePlaceholder = @"Username";
+        s.nameLabel = @"Username:";
         s.wantsName = true;
     } else if (dialogId == DialogDefinitions::DIALOG_MAINMENU_OPTIONS) {
         s.title = @"Options";
@@ -436,6 +452,9 @@ void AppPlatform_macOS::showDialog(int dialogId)
 
     NSAlert* alert = [[NSAlert alloc] init];
     [alert setMessageText:spec.title];
+    if (spec.informative && [spec.informative length] > 0) {
+        [alert setInformativeText:spec.informative];
+    }
     [alert addButtonWithTitle:@"OK"];
     [alert addButtonWithTitle:@"Cancel"];
 
@@ -444,29 +463,70 @@ void AppPlatform_macOS::showDialog(int dialogId)
     NSTextField* seedField = nil;
     NSPopUpButton* gameModePopup = nil;
 
-    CGFloat width = 260.0;
-    CGFloat rowH  = 24.0;
-    CGFloat pad   = 8.0;
+    // Lay out rows as <label> | <control>. Labels live in the left
+    // gutter so even a single-row dialog (e.g. Set username) shows up as
+    // a clearly captioned field rather than a thin unlabelled strip.
+    CGFloat labelW = 90.0;
+    CGFloat ctrlW  = 200.0;
+    CGFloat gap    = 8.0;
+    CGFloat width  = labelW + gap + ctrlW;
+    CGFloat rowH   = 24.0;
+    CGFloat pad    = 10.0;
     int rows = (spec.wantsName ? 1 : 0) + (spec.wantsSeed ? 1 : 0) + (spec.wantsGameMode ? 1 : 0);
 
     if (rows > 0) {
-        accessory = [[[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, rows * (rowH + pad))] autorelease];
-        CGFloat y = (rows - 1) * (rowH + pad);
+        CGFloat totalH = rows * rowH + (rows - 1) * pad;
+        accessory = [[[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, totalH)] autorelease];
+        CGFloat y = totalH - rowH;
 
         if (spec.wantsName) {
-            nameField = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, y, width, rowH)] autorelease];
-            [[nameField cell] setPlaceholderString:@"Name"];
+            NSTextField* lbl = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, y, labelW, rowH)] autorelease];
+            [lbl setStringValue:spec.nameLabel];
+            [lbl setEditable:NO];
+            [lbl setBordered:NO];
+            [lbl setDrawsBackground:NO];
+            [lbl setAlignment:NSRightTextAlignment];
+            [accessory addSubview:lbl];
+
+            nameField = [[[NSTextField alloc] initWithFrame:NSMakeRect(labelW + gap, y, ctrlW, rowH)] autorelease];
+            [[nameField cell] setPlaceholderString:spec.namePlaceholder];
+            // Pre-fill the username dialog with the currently-saved name
+            // so the user knows what's there and can edit it in place.
+            if (dialogId == DialogDefinitions::DIALOG_SET_USERNAME) {
+                std::map<std::string, std::string> optionMap = loadOptionMap();
+                std::map<std::string, std::string>::const_iterator cit =
+                    optionMap.find(OptionStrings::Multiplayer_Username);
+                if (cit != optionMap.end() && !cit->second.empty()) {
+                    [nameField setStringValue:[NSString stringWithUTF8String:cit->second.c_str()]];
+                }
+            }
             [accessory addSubview:nameField];
             y -= (rowH + pad);
         }
         if (spec.wantsSeed) {
-            seedField = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, y, width, rowH)] autorelease];
+            NSTextField* lbl = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, y, labelW, rowH)] autorelease];
+            [lbl setStringValue:@"Seed:"];
+            [lbl setEditable:NO];
+            [lbl setBordered:NO];
+            [lbl setDrawsBackground:NO];
+            [lbl setAlignment:NSRightTextAlignment];
+            [accessory addSubview:lbl];
+
+            seedField = [[[NSTextField alloc] initWithFrame:NSMakeRect(labelW + gap, y, ctrlW, rowH)] autorelease];
             [[seedField cell] setPlaceholderString:@"Seed (optional)"];
             [accessory addSubview:seedField];
             y -= (rowH + pad);
         }
         if (spec.wantsGameMode) {
-            gameModePopup = [[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, y, width, rowH) pullsDown:NO] autorelease];
+            NSTextField* lbl = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, y, labelW, rowH)] autorelease];
+            [lbl setStringValue:@"Game mode:"];
+            [lbl setEditable:NO];
+            [lbl setBordered:NO];
+            [lbl setDrawsBackground:NO];
+            [lbl setAlignment:NSRightTextAlignment];
+            [accessory addSubview:lbl];
+
+            gameModePopup = [[[NSPopUpButton alloc] initWithFrame:NSMakeRect(labelW + gap, y, ctrlW, rowH) pullsDown:NO] autorelease];
             [gameModePopup addItemWithTitle:@"Creative"];
             [gameModePopup addItemWithTitle:@"Survival"];
             [accessory addSubview:gameModePopup];
