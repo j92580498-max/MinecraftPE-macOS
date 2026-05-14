@@ -168,8 +168,34 @@ SoundEngine::~SoundEngine()
 }
 
 SoundDesc SoundEngine::_pp(const std::string& fn) {
+    // Sound clips live in Contents/Resources/sound/aac/<category>/<file>.m4a
+    // (see the Makefile copy of handheld/data/sound/aac/). NSBundle's
+    // pathForResource:ofType: only looks at the top of Resources/ and
+    // *.lproj children, so we have to point it at the right subdir
+    // explicitly. The actual subdirs are damage, mob, random, step --
+    // matches the categories used in init() below.
     NSString* filename = [[NSString alloc] initWithUTF8String:fn.c_str()];
-    NSString* path = [[NSBundle mainBundle] pathForResource:filename ofType:@"m4a"];
+    NSString* path = nil;
+    NSArray* subdirs = [NSArray arrayWithObjects:
+        @"sound/aac/damage",
+        @"sound/aac/mob",
+        @"sound/aac/random",
+        @"sound/aac/step",
+        @"sound/aac",
+        @"sound",
+        nil];
+    for (NSString* sub in subdirs) {
+        path = [[NSBundle mainBundle] pathForResource:filename
+                                               ofType:@"m4a"
+                                          inDirectory:sub];
+        if (path && [[NSFileManager defaultManager] fileExistsAtPath:path])
+            break;
+        path = nil;
+    }
+    if (!path) {
+        // Last-ditch flat fallback (mirrors how the iOS bundle ships).
+        path = [[NSBundle mainBundle] pathForResource:filename ofType:@"m4a"];
+    }
     [filename release];
     if (!path)
         return SoundDesc();
