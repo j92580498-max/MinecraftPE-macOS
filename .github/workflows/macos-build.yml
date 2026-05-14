@@ -3,9 +3,14 @@ name: macOS build + smoke-test
 on:
   push:
     branches: [main]
+    tags:
+      - "v*"
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 # We want to know "does the .app come up at all?" — not a benchmark.
 jobs:
@@ -49,6 +54,17 @@ jobs:
           time make -j$(sysctl -n hw.ncpu) BUILD=release
           ls -la build/
           ls -la build/MinecraftPE.app/Contents/MacOS/
+
+      - name: Package Mavericks app archive
+        if: matrix.label == 'sonoma'
+        working-directory: handheld/project/osxproj
+        run: |
+          set -eux
+          rm -rf dist
+          mkdir -p dist
+          ditto -c -k --keepParent build/MinecraftPE.app dist/MinecraftPE-mavericks-x86_64.zip
+          tar -czf dist/MinecraftPE-mavericks-x86_64.tar.gz -C build MinecraftPE.app
+          (cd dist && shasum -a 256 MinecraftPE-mavericks-x86_64.zip MinecraftPE-mavericks-x86_64.tar.gz | tee SHA256SUMS)
 
       - name: Inspect the Mach-O
         working-directory: handheld/project/osxproj
@@ -109,6 +125,17 @@ jobs:
           # to look at.
           exit 0
 
+      - name: Upload packaged app
+        if: matrix.label == 'sonoma'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MinecraftPE-mavericks-x86_64
+          path: |
+            handheld/project/osxproj/dist/MinecraftPE-mavericks-x86_64.zip
+            handheld/project/osxproj/dist/MinecraftPE-mavericks-x86_64.tar.gz
+            handheld/project/osxproj/dist/SHA256SUMS
+          if-no-files-found: error
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -119,3 +146,39 @@ jobs:
             handheld/project/osxproj/screenshot.png
             handheld/project/osxproj/processes.txt
           if-no-files-found: warn
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/') && matrix.label == 'sonoma'
+        working-directory: handheld/project/osxproj
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          {
+            echo "## ${GITHUB_REF_NAME} — Mavericks x86_64"
+            echo
+            echo "### Downloads"
+            echo
+            echo "| File | SHA-256 |"
+            echo "| --- | --- |"
+            awk '{ print "| `" $2 "` | `" $1 "` |" }' dist/SHA256SUMS
+            echo
+            echo "### Run"
+            echo
+            echo '```sh'
+            echo 'unzip MinecraftPE-mavericks-x86_64.zip -d /Applications'
+            echo 'xattr -dr com.apple.quarantine /Applications/MinecraftPE.app'
+            echo '/Applications/MinecraftPE.app/Contents/MacOS/MinecraftPE'
+            echo '```'
+            echo
+            echo "### Verification"
+            echo
+            echo "- Built on GitHub macOS CI with \`-mmacosx-version-min=10.9\`."
+            echo "- Packaged as \`MinecraftPE-mavericks-x86_64.zip\` and \`MinecraftPE-mavericks-x86_64.tar.gz\`."
+          } > dist/release-notes.md
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/MinecraftPE-mavericks-x86_64.zip \
+            dist/MinecraftPE-mavericks-x86_64.tar.gz \
+            --title "${GITHUB_REF_NAME} — Mavericks x86_64" \
+            --notes-file dist/release-notes.md \
+            --latest
