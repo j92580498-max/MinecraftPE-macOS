@@ -64,7 +64,14 @@ LevelRenderer::LevelRenderer( Minecraft* mc)
 	tileRenderer(NULL),
 	destroyProgress(0)
 {
-#ifdef OPENGL_ES
+// Chunk::rebuild() picks the VBO vs glNewList path off USE_VBO (defined
+// in gles.h whenever we're on a GL target that has buffer objects — iOS
+// GLES 1.1 *and* macOS desktop GL 2.1). The buffer allocation here used
+// to be gated on OPENGL_ES, which meant the macOS build was using VBOs
+// in the renderer but never actually allocating them — chunk->vboBuffers
+// pointed at uninitialised heap and Chunk::rebuild() crashed inside
+// Tesselator::end() the moment any chunk had geometry to upload.
+#ifdef USE_VBO
 	int maxChunksWidth = 2 * LEVEL_WIDTH / CHUNK_SIZE + 1;
 	numListsOrBuffers = maxChunksWidth * maxChunksWidth * (128/CHUNK_SIZE) * 3;
 	chunkBuffers = new GLuint[numListsOrBuffers];
@@ -88,7 +95,7 @@ LevelRenderer::~LevelRenderer()
 
 	deleteChunks();
 
-#ifdef OPENGL_ES
+#ifdef USE_VBO
 	glDeleteBuffers(numListsOrBuffers, chunkBuffers);
 	glDeleteBuffers(1, &skyBuffer);
 	delete[] chunkBuffers;
@@ -1012,7 +1019,7 @@ void LevelRenderer::renderSky(float alpha) {
     glEnable2(GL_FOG);
     glColor4f2(sr, sg, sb, 1.0f);
 
-#ifdef OPENGL_ES
+#ifdef USE_VBO
 	drawArrayVT(skyBuffer, skyVertexCount);
 #endif
     glEnable2(GL_TEXTURE_2D);
@@ -1233,7 +1240,7 @@ void LevelRenderer::onGraphicsReset()
 	generateSky();
 
 	// Get new buffers
-#ifdef OPENGL_ES
+#ifdef USE_VBO
 	glGenBuffers2(numListsOrBuffers, chunkBuffers);
 #else
 	chunkLists = glGenLists(numListsOrBuffers);
