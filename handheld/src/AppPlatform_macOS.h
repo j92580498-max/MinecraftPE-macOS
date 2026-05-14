@@ -28,8 +28,12 @@ class AppPlatform_macOS: public AppPlatform
 {
 	typedef AppPlatform super;
 public:
-    AppPlatform_macOS(MinecraftMacGLViewRef view) {
-        _view = view;
+    AppPlatform_macOS(MinecraftMacGLViewRef view)
+        : _screenW(854),
+          _screenH(480),
+          _dialogResultStatus(0),
+          _view(view)
+    {
         srand((unsigned int)time(0));
     }
 

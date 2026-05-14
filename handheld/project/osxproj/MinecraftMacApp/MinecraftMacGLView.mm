@@ -126,6 +126,33 @@ static int translateNSKeyCodeToEngineKey(unsigned short macKeyCode, NSString* ch
     _platform   = NULL;
     _timer      = nil;
     _running    = NO;
+
+    // -prepareOpenGL is only called by NSOpenGLView the first time the
+    // view actually has to draw, which on Mavericks happens *after* the
+    // call to -[MinecraftMacAppDelegate applicationDidFinishLaunching:]
+    // returns. We can't wait that long: the delegate calls
+    // -startEngine on us synchronously, which immediately dereferences
+    // _platform. So allocate the engine-side objects right here, where
+    // they don't need a current GL context anyway.
+    _platform   = new AppPlatform_macOS(self);
+    _appContext = new AppContext();
+    _appContext->platform = _platform;
+    _appContext->doRender = false;
+
+    NSString* appSupport = [NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    NSString* storage = [appSupport stringByAppendingPathComponent:@"MinecraftPE"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:storage
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    const char* cstorage = [storage UTF8String];
+    _platform->setStoragePath(cstorage);
+
+    _app = new NinecraftApp();
+    ((Minecraft*)_app)->externalStoragePath      = cstorage;
+    ((Minecraft*)_app)->externalCacheStoragePath = cstorage;
+
     return self;
 }
 
@@ -152,28 +179,6 @@ static int translateNSKeyCodeToEngineKey(unsigned short macKeyCode, NSString* ch
     // Standard vsync via swap interval = 1.
     GLint swap = 1;
     [[self openGLContext] setValues:&swap forParameter:NSOpenGLCPSwapInterval];
-
-    if (!_platform) {
-        _platform   = new AppPlatform_macOS(self);
-        _appContext = new AppContext();
-        _appContext->platform = _platform;
-        _appContext->doRender = false;
-
-        // External storage path: ~/Library/Application Support/MinecraftPE
-        NSString* appSupport = [NSSearchPathForDirectoriesInDomains(
-            NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
-        NSString* storage = [appSupport stringByAppendingPathComponent:@"MinecraftPE"];
-        [[NSFileManager defaultManager] createDirectoryAtPath:storage
-                                  withIntermediateDirectories:YES
-                                                   attributes:nil
-                                                        error:nil];
-        const char* cstorage = [storage UTF8String];
-        _platform->setStoragePath(cstorage);
-
-        _app = new NinecraftApp();
-        ((Minecraft*)_app)->externalStoragePath      = cstorage;
-        ((Minecraft*)_app)->externalCacheStoragePath = cstorage;
-    }
 }
 
 - (void)startEngine
