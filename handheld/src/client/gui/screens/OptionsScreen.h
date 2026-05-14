@@ -19,6 +19,7 @@ public:
 	~OptionsScreen();
 	void setupPositions();
 	void buttonClicked( Button* button );
+	void keyPressed(int key);
 	void render(int xm, int ym, float a);
 	void removed();
 	void selectCategory(int index);
@@ -30,6 +31,7 @@ private:
 	Touch::THeader* bHeader;
 	ImageButton* btnClose;
 	Touch::TButton* btnUsername;
+	Touch::TButton* btnGameMode;
 	std::vector<Touch::TButton*> categoryButtons;
 	std::vector<OptionsPane*> optionPanes;
 	OptionsPane* currentOptionPane;

@@ -311,6 +311,10 @@ static int translateNSKeyCodeToEngineKey(unsigned short macKeyCode, NSString* ch
 {
     NSString* chars = [event charactersIgnoringModifiers];
     int engineKey = translateNSKeyCodeToEngineKey([event keyCode], chars);
+    if (engineKey == Keyboard::KEY_F11) {
+        [[self window] toggleFullScreen:self];
+        return;
+    }
     if (engineKey > 0) {
         Keyboard::feed((unsigned char)engineKey, 1);
     }

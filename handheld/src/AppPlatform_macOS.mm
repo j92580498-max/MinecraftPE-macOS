@@ -4,6 +4,8 @@
 #import <AppKit/AppKit.h>
 
 #include "client/gui/screens/DialogDefinitions.h"
+#include "client/OptionStrings.h"
+#include <cstdlib>
 
 // ---------------------------------------------------------------------------
 // Texture loading
@@ -238,25 +240,64 @@ void AppPlatform_macOS::showKeyboard() { super::showKeyboard(); }
 void AppPlatform_macOS::hideKeyboard() { super::hideKeyboard(); }
 
 // ---------------------------------------------------------------------------
-// Option strings: mirror iOS by exposing NSUserDefaults entries that look
-// like Minecraft option keys.
+// Option strings: expose saved options plus NSUserDefaults overrides.
 // ---------------------------------------------------------------------------
 StringVector AppPlatform_macOS::getOptionStrings()
 {
     StringVector options;
-    NSDictionary* d = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
-    for (NSString *key in d) {
+
+    std::map<std::string, std::string> optionMap = loadOptionMap();
+    for (std::map<std::string, std::string>::const_iterator it = optionMap.begin();
+         it != optionMap.end(); ++it) {
+        options.push_back(it->first);
+        options.push_back(it->second);
+    }
+    return options;
+}
+
+std::map<std::string, std::string> AppPlatform_macOS::loadOptionMap()
+{
+    std::map<std::string, std::string> optionMap;
+    std::string storagePath = _storagePath.empty() ? std::string(".") : _storagePath;
+    NSString* path = [NSString stringWithFormat:@"%s/options.txt", storagePath.c_str()];
+    NSString* contents = [NSString stringWithContentsOfFile:path
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:nil];
+    if (contents) {
+        NSArray* lines = [contents componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+        for (NSString* line in lines) {
+            NSRange sep = [line rangeOfString:@":"];
+            if (sep.location != NSNotFound && sep.location + 1 < [line length]) {
+                NSString* key = [line substringToIndex:sep.location];
+                NSString* value = [line substringFromIndex:sep.location + 1];
+                optionMap[[key UTF8String]] = [value UTF8String];
+            }
+        }
+    }
+
+    NSDictionary* defaults = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
+    for (NSString* key in defaults) {
         if ([key hasPrefix:@"mp_"]
          || [key hasPrefix:@"gfx_"]
          || [key hasPrefix:@"ctrl_"]
          || [key hasPrefix:@"feedback_"]
          || [key hasPrefix:@"game_"]) {
-            id value = [d objectForKey:key];
-            options.push_back([key UTF8String]);
-            options.push_back([[value description] UTF8String]);
+            id value = [defaults objectForKey:key];
+            optionMap[[key UTF8String]] = [[value description] UTF8String];
         }
     }
-    return options;
+    return optionMap;
+}
+
+void AppPlatform_macOS::saveOptionStrings(const StringVector& strings)
+{
+    std::string storagePath = _storagePath.empty() ? std::string(".") : _storagePath;
+    NSString* path = [NSString stringWithFormat:@"%s/options.txt", storagePath.c_str()];
+    NSMutableString* contents = [NSMutableString string];
+    for (StringVector::const_iterator it = strings.begin(); it != strings.end(); ++it) {
+        [contents appendFormat:@"%s\n", it->c_str()];
+    }
+    [contents writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 // ---------------------------------------------------------------------------
@@ -268,14 +309,16 @@ struct DialogSpec {
     NSString* title;
     bool wantsName;
     bool wantsSeed;
+    bool wantsGameMode;
 };
 
 DialogSpec dialogSpecFor(int dialogId) {
-    DialogSpec s = { @"Minecraft", false, false };
+    DialogSpec s = { @"Minecraft", false, false, false };
     if (dialogId == DialogDefinitions::DIALOG_CREATE_NEW_WORLD) {
         s.title = @"Create new world";
         s.wantsName = true;
         s.wantsSeed = true;
+        s.wantsGameMode = true;
     } else if (dialogId == DialogDefinitions::DIALOG_RENAME_MP_WORLD) {
         s.title = @"Rename world";
         s.wantsName = true;
@@ -308,18 +351,85 @@ void AppPlatform_macOS::showDialog(int dialogId)
     }
 
     if (dialogId == DialogDefinitions::DIALOG_MAINMENU_OPTIONS) {
-        // The iOS port shows InAppSettingsKit here; on macOS we surface a
-        // pointer to NSUserDefaults. A richer NSWindow-based settings panel
-        // can be wired up later without touching the engine.
         NSAlert* alert = [[NSAlert alloc] init];
         [alert setMessageText:@"Options"];
-        [alert setInformativeText:@"Settings are stored in NSUserDefaults. "
-                                    "Use `defaults write com.mojang.MinecraftPE <key> <value>` "
-                                    "for now."];
-        [alert addButtonWithTitle:@"OK"];
-        [alert runModal];
+        [alert addButtonWithTitle:@"Save"];
+        [alert addButtonWithTitle:@"Cancel"];
+
+        std::map<std::string, std::string> optionMap = loadOptionMap();
+        CGFloat width = 300.0;
+        CGFloat rowH = 26.0;
+        CGFloat pad = 8.0;
+        NSView* accessory = [[[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, rowH * 5 + pad * 4)] autorelease];
+
+        NSTextField* usernameField = [[[NSTextField alloc] initWithFrame:NSMakeRect(120, rowH * 4 + pad * 4, 180, rowH)] autorelease];
+        [[usernameField cell] setPlaceholderString:@"Username"];
+        if (optionMap.find(OptionStrings::Multiplayer_Username) != optionMap.end())
+            [usernameField setStringValue:[NSString stringWithUTF8String:optionMap[OptionStrings::Multiplayer_Username].c_str()]];
+
+        NSSlider* sensitivitySlider = [[[NSSlider alloc] initWithFrame:NSMakeRect(120, rowH * 3 + pad * 3, 180, rowH)] autorelease];
+        [sensitivitySlider setMinValue:0.0];
+        [sensitivitySlider setMaxValue:1.0];
+        [sensitivitySlider setDoubleValue:0.5];
+        if (optionMap.find(OptionStrings::Controls_Sensitivity) != optionMap.end())
+            [sensitivitySlider setDoubleValue:atof(optionMap[OptionStrings::Controls_Sensitivity].c_str())];
+
+        NSButton* invertMouse = [[[NSButton alloc] initWithFrame:NSMakeRect(0, rowH * 2 + pad * 2, width, rowH)] autorelease];
+        [invertMouse setButtonType:NSSwitchButton];
+        [invertMouse setTitle:@"Invert mouse"];
+        [invertMouse setState:(optionMap[OptionStrings::Controls_InvertMouse] == "1" || optionMap[OptionStrings::Controls_InvertMouse] == "true") ? NSOnState : NSOffState];
+
+        NSButton* leftHanded = [[[NSButton alloc] initWithFrame:NSMakeRect(0, rowH + pad, width, rowH)] autorelease];
+        [leftHanded setButtonType:NSSwitchButton];
+        [leftHanded setTitle:@"Left handed"];
+        [leftHanded setState:(optionMap[OptionStrings::Controls_IsLefthanded] == "1" || optionMap[OptionStrings::Controls_IsLefthanded] == "true") ? NSOnState : NSOffState];
+
+        NSButton* fancyGraphics = [[[NSButton alloc] initWithFrame:NSMakeRect(0, 0, width, rowH)] autorelease];
+        [fancyGraphics setButtonType:NSSwitchButton];
+        [fancyGraphics setTitle:@"Fancy graphics"];
+        [fancyGraphics setState:(optionMap.find(OptionStrings::Graphics_Fancy) == optionMap.end() || optionMap[OptionStrings::Graphics_Fancy] == "1" || optionMap[OptionStrings::Graphics_Fancy] == "true") ? NSOnState : NSOffState];
+
+        NSTextField* usernameLabel = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, rowH * 4 + pad * 4, 110, rowH)] autorelease];
+        [usernameLabel setStringValue:@"Username"];
+        [usernameLabel setEditable:NO];
+        [usernameLabel setBordered:NO];
+        [usernameLabel setDrawsBackground:NO];
+        NSTextField* sensitivityLabel = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, rowH * 3 + pad * 3, 110, rowH)] autorelease];
+        [sensitivityLabel setStringValue:@"Sensitivity"];
+        [sensitivityLabel setEditable:NO];
+        [sensitivityLabel setBordered:NO];
+        [sensitivityLabel setDrawsBackground:NO];
+
+        [accessory addSubview:usernameLabel];
+        [accessory addSubview:usernameField];
+        [accessory addSubview:sensitivityLabel];
+        [accessory addSubview:sensitivitySlider];
+        [accessory addSubview:invertMouse];
+        [accessory addSubview:leftHanded];
+        [accessory addSubview:fancyGraphics];
+        [alert setAccessoryView:accessory];
+
+        [[alert window] performSelector:@selector(makeFirstResponder:)
+                             withObject:usernameField
+                             afterDelay:0.0];
+        NSInteger response = [alert runModal];
+        if (response == NSAlertFirstButtonReturn) {
+            optionMap[OptionStrings::Multiplayer_Username] = [[usernameField stringValue] UTF8String];
+            optionMap[OptionStrings::Controls_Sensitivity] = [[[NSString stringWithFormat:@"%g", [sensitivitySlider doubleValue]] description] UTF8String];
+            optionMap[OptionStrings::Controls_InvertMouse] = ([invertMouse state] == NSOnState) ? "1" : "0";
+            optionMap[OptionStrings::Controls_IsLefthanded] = ([leftHanded state] == NSOnState) ? "1" : "0";
+            optionMap[OptionStrings::Graphics_Fancy] = ([fancyGraphics state] == NSOnState) ? "1" : "0";
+            StringVector saved;
+            for (std::map<std::string, std::string>::const_iterator it = optionMap.begin();
+                 it != optionMap.end(); ++it) {
+                saved.push_back(it->first + ":" + it->second);
+            }
+            saveOptionStrings(saved);
+            _dialogResultStatus = 1;
+        } else {
+            _dialogResultStatus = 0;
+        }
         [alert release];
-        _dialogResultStatus = 1;
         _dialogResultStrings.clear();
         return;
     }
@@ -332,11 +442,12 @@ void AppPlatform_macOS::showDialog(int dialogId)
     NSView* accessory = nil;
     NSTextField* nameField = nil;
     NSTextField* seedField = nil;
+    NSPopUpButton* gameModePopup = nil;
 
     CGFloat width = 260.0;
     CGFloat rowH  = 24.0;
     CGFloat pad   = 8.0;
-    int rows = (spec.wantsName ? 1 : 0) + (spec.wantsSeed ? 1 : 0);
+    int rows = (spec.wantsName ? 1 : 0) + (spec.wantsSeed ? 1 : 0) + (spec.wantsGameMode ? 1 : 0);
 
     if (rows > 0) {
         accessory = [[[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, rows * (rowH + pad))] autorelease];
@@ -352,16 +463,18 @@ void AppPlatform_macOS::showDialog(int dialogId)
             seedField = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, y, width, rowH)] autorelease];
             [[seedField cell] setPlaceholderString:@"Seed (optional)"];
             [accessory addSubview:seedField];
+            y -= (rowH + pad);
+        }
+        if (spec.wantsGameMode) {
+            gameModePopup = [[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, y, width, rowH) pullsDown:NO] autorelease];
+            [gameModePopup addItemWithTitle:@"Creative"];
+            [gameModePopup addItemWithTitle:@"Survival"];
+            [accessory addSubview:gameModePopup];
         }
         [alert setAccessoryView:accessory];
     }
 
-    // NSAlert puts the OK button as the keyboard focus by default, which
-    // makes the text field feel “dead” — the user has to mouse-click into
-    // it before typing anything, and on Mavericks that’s easy to miss
-    // because the field has no visible focus ring until it’s active.
-    // Push focus into the first text field once the modal sheet is laid
-    // out so typing just works.
+    // Push focus into the first text field once the modal sheet is laid out.
     if (nameField) {
         [[alert window] performSelector:@selector(makeFirstResponder:)
                              withObject:nameField
@@ -372,20 +485,22 @@ void AppPlatform_macOS::showDialog(int dialogId)
                              afterDelay:0.0];
     }
 
-    NSModalResponse response = [alert runModal];
+    NSInteger response = [alert runModal];
     bool ok = (response == NSAlertFirstButtonReturn);
 
     _dialogResultStrings.clear();
     if (ok) {
         if (nameField) {
             std::string name([[nameField stringValue] UTF8String]);
-            _dialogResultStrings.push_back("name");
             _dialogResultStrings.push_back(name);
         }
         if (seedField) {
             std::string seed([[seedField stringValue] UTF8String]);
-            _dialogResultStrings.push_back("seed");
             _dialogResultStrings.push_back(seed);
+        }
+        if (gameModePopup) {
+            std::string mode = ([gameModePopup indexOfSelectedItem] == 1) ? "survival" : "creative";
+            _dialogResultStrings.push_back(mode);
         }
         _dialogResultStatus = 1;
     } else {
