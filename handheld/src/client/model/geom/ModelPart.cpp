@@ -181,7 +181,16 @@ void ModelPart::translateTo( float scale )
 
 void ModelPart::compile( float scale )
 {
-#ifndef OPENGL_ES
+	// Gate the display-list path on USE_VBO, not OPENGL_ES. On macOS
+	// desktop GL 2.1 the engine has USE_VBO defined (see gles.h)
+	// but OPENGL_ES is not, so the old condition wrapped the
+	// tesselator call in glNewList/glEndList while Tesselator::end
+	// (under USE_VBO) only uploads to the VBO and never issues a
+	// draw. The display list was therefore empty and glCallList()
+	// drew nothing -- the cause of the missing player preview in
+	// the Armor screen. Same shape of bug as the chunk VBO
+	// regression fixed in baa7155.
+#ifndef USE_VBO
 	list = glGenLists(1);
 	// FIX NORMAL BUG HERE
 	glNewList(list, GL_COMPILE);
@@ -194,7 +203,7 @@ void ModelPart::compile( float scale )
 			cubes[i]->compile(t, scale);
 	}
 	t.end(true, vboId);
-#ifndef OPENGL_ES
+#ifndef USE_VBO
 	glEndList();
 #endif
 	compiled = true;
@@ -202,7 +211,7 @@ void ModelPart::compile( float scale )
 
 void ModelPart::draw()
 {
-#ifdef OPENGL_ES
+#ifdef USE_VBO
 	drawArrayVT_NoState(vboId, cubes.size() * 2 * 3 * 6, 24);
 #else
 	glCallList(list);
